@@ -82,7 +82,7 @@ class ChatDeepSeek(ChatOpenAI):
         **kwargs: Any,
     ) -> ChatResult:
         """
-        生成聊天响应，并记录token使用量
+        生成聊天响应，并记录token使用量和调用详情
         """
 
         # 记录开始时间
@@ -152,6 +152,42 @@ class ChatDeepSeek(ChatOpenAI):
 
                 except Exception as track_error:
                     logger.error(f"⚠️ [DeepSeek] Token统计失败: {track_error}", exc_info=True)
+            
+            # 记录LLM调用详情（输入和输出内容）
+            try:
+                from tradingagents.utils.llm_call_recorder import get_llm_recorder
+                
+                recorder = get_llm_recorder()
+                if recorder.is_enabled():
+                    # 计算执行时间
+                    duration = time.time() - start_time
+                    
+                    # 获取成本信息
+                    cost = usage_record.cost if 'usage_record' in locals() and usage_record else 0.0
+                    
+                    # 准备上下文信息
+                    context = {
+                        "analysis_type": analysis_type or "stock_analysis",
+                        "stop_sequences": stop,
+                        "kwargs": {k: str(v)[:100] for k, v in kwargs.items() if k not in ['session_id', 'analysis_type']}
+                    }
+                    
+                    # 记录调用
+                    recorder.record_call(
+                        provider="deepseek",
+                        model=self.model_name,
+                        messages=messages,
+                        response=result,
+                        duration=duration,
+                        session_id=session_id,
+                        context=context,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost=cost
+                    )
+                    
+            except Exception as record_error:
+                logger.debug(f"🔍 [DeepSeek] LLM调用记录失败: {record_error}")
             
             return result
             

@@ -951,7 +951,7 @@ class Toolkit:
                     result_data.append(f"## 港股市场数据\n获取失败: {e}")
 
             else:
-                # 美股：优先使用FINNHUB API数据源
+                # 美股：使用优化的FinnHub数据源（带频率限制处理）
                 logger.info(f"🇺🇸 [统一市场工具] 处理美股市场数据...")
 
                 try:

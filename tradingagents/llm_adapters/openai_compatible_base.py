@@ -122,17 +122,59 @@ class OpenAICompatibleBase(ChatOpenAI):
         **kwargs: Any,
     ) -> ChatResult:
         """
-        生成聊天响应，并记录token使用量
+        生成聊天响应，并记录token使用量和调用详情
         """
         
         # 记录开始时间
         start_time = time.time()
         
+        # 提取参数
+        session_id = kwargs.get('session_id', f"{self.provider_name}_{hash(str(messages))%10000}")
+        analysis_type = kwargs.get('analysis_type', 'stock_analysis')
+        
         # 调用父类生成方法
         result = super()._generate(messages, stop, run_manager, **kwargs)
         
-        # 记录token使用
-        self._track_token_usage(result, kwargs, start_time)
+        # 记录token使用量
+        input_tokens = 0
+        output_tokens = 0
+        cost = 0.0
+        
+        if TOKEN_TRACKING_ENABLED:
+            try:
+                input_tokens, output_tokens, cost = self._track_token_usage(result, kwargs, start_time)
+            except Exception as e:
+                logger.error(f"⚠️ {self.provider_name} Token追踪失败: {e}", exc_info=True)
+        
+        # 记录LLM调用详情
+        try:
+            from tradingagents.utils.llm_call_recorder import get_llm_recorder
+            
+            recorder = get_llm_recorder()
+            if recorder.is_enabled():
+                duration = time.time() - start_time
+                
+                context = {
+                    "analysis_type": analysis_type,
+                    "stop_sequences": stop,
+                    "kwargs": {k: str(v)[:100] for k, v in kwargs.items() if k not in ['session_id', 'analysis_type']}
+                }
+                
+                recorder.record_call(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    messages=messages,
+                    response=result,
+                    duration=duration,
+                    session_id=session_id,
+                    context=context,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=cost
+                )
+                
+        except Exception as record_error:
+            logger.debug(f"🔍 [{self.provider_name}] LLM调用记录失败: {record_error}")
         
         return result
 
@@ -148,10 +190,28 @@ class OpenAICompatibleBase(ChatOpenAI):
             completion_tokens = usage.get("output_tokens") if usage else None
 
             elapsed = time.time() - start_time
+            if prompt_tokens > 0 or completion_tokens > 0:
+                # 生成会话ID
+                session_id = kwargs.get('session_id', f"{self.provider_name}_{hash(str(kwargs))%10000}")
+                analysis_type = kwargs.get('analysis_type', 'stock_analysis')
+                
+                # 记录使用量
+                usage_record = token_tracker.track_usage(
+                    provider=self.provider_name,
+                    model_name=self.model_name,
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    session_id=session_id,
+                    analysis_type=analysis_type
+                )
+                
+                if usage_record:
+                    cost = usage_record.cost
             logger.info(
                 f"📊 Token使用 - Provider: {getattr(self, 'provider_name', 'unknown')}, Model: {getattr(self, 'model_name', 'unknown')}, "
                 f"总tokens: {total_tokens}, 提示: {prompt_tokens}, 补全: {completion_tokens}, 用时: {elapsed:.2f}s"
             )
+            return prompt_tokens, completion_tokens, cost
         except Exception as e:
             logger.warning(f"⚠️ Token跟踪记录失败: {e}")
 

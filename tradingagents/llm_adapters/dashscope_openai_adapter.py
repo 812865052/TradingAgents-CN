@@ -51,12 +51,24 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         logger.info(f"   API Base: {api_base}")
     
     def _generate(self, *args, **kwargs):
-        """重写生成方法，添加 token 使用量追踪"""
+        """重写生成方法，添加 token 使用量追踪和调用记录"""
+        
+        import time
+        start_time = time.time()
+        
+        # 提取消息参数
+        messages = args[0] if args else []
+        session_id = kwargs.pop('session_id', f"dashscope_openai_{hash(str(args))%10000}")
+        analysis_type = kwargs.pop('analysis_type', 'stock_analysis')
         
         # 调用父类的生成方法
         result = super()._generate(*args, **kwargs)
         
         # 追踪 token 使用量
+        input_tokens = 0
+        output_tokens = 0
+        cost = 0.0
+        
         try:
             # 从结果中提取 token 使用信息
             if hasattr(result, 'llm_output') and result.llm_output:
@@ -66,12 +78,8 @@ class ChatDashScopeOpenAI(ChatOpenAI):
                 output_tokens = token_usage.get('completion_tokens', 0)
                 
                 if input_tokens > 0 or output_tokens > 0:
-                    # 生成会话ID
-                    session_id = kwargs.get('session_id', f"dashscope_openai_{hash(str(args))%10000}")
-                    analysis_type = kwargs.get('analysis_type', 'stock_analysis')
-                    
                     # 使用 TokenTracker 记录使用量
-                    token_tracker.track_usage(
+                    usage_record = token_tracker.track_usage(
                         provider="dashscope",
                         model_name=self.model_name,
                         input_tokens=input_tokens,
@@ -80,9 +88,41 @@ class ChatDashScopeOpenAI(ChatOpenAI):
                         analysis_type=analysis_type
                     )
                     
+                    if usage_record:
+                        cost = usage_record.cost
+                    
         except Exception as track_error:
             # token 追踪失败不应该影响主要功能
             logger.error(f"⚠️ Token 追踪失败: {track_error}")
+        
+        # 记录LLM调用详情
+        try:
+            from tradingagents.utils.llm_call_recorder import get_llm_recorder
+            
+            recorder = get_llm_recorder()
+            if recorder.is_enabled():
+                duration = time.time() - start_time
+                
+                context = {
+                    "analysis_type": analysis_type,
+                    "kwargs": {k: str(v)[:100] for k, v in kwargs.items() if k not in ['session_id', 'analysis_type']}
+                }
+                
+                recorder.record_call(
+                    provider="dashscope",
+                    model=self.model_name,
+                    messages=messages,
+                    response=result,
+                    duration=duration,
+                    session_id=session_id,
+                    context=context,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=cost
+                )
+                
+        except Exception as record_error:
+            logger.debug(f"🔍 [DashScope] LLM调用记录失败: {record_error}")
         
         return result
 

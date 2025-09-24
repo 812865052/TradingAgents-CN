@@ -53,16 +53,21 @@ class DeepSeekDirectAdapter:
         
         logger.info(f"✅ DeepSeek直接适配器初始化成功，模型: {model}")
     
-    def invoke(self, messages: Union[str, List[Dict[str, str]]]) -> str:
+    def invoke(self, messages: Union[str, List[Dict[str, str]]], session_id: str = None, **kwargs) -> str:
         """
         调用DeepSeek API
         
         Args:
             messages: 消息内容，可以是字符串或消息列表
+            session_id: 会话ID（用于记录）
+            **kwargs: 其他参数
             
         Returns:
             str: 模型响应
         """
+        import time
+        start_time = time.time()
+        
         try:
             # 处理输入消息格式
             if isinstance(messages, str):
@@ -82,6 +87,42 @@ class DeepSeekDirectAdapter:
             
             result = response.choices[0].message.content
             logger.debug(f"DeepSeek API调用成功，响应长度: {len(result)}")
+            
+            # 记录LLM调用详情
+            try:
+                from tradingagents.utils.llm_call_recorder import get_llm_recorder
+                
+                recorder = get_llm_recorder()
+                if recorder.is_enabled():
+                    duration = time.time() - start_time
+                    
+                    # 估算token使用量（简单估算）
+                    input_text = " ".join([msg.get("content", "") for msg in formatted_messages])
+                    input_tokens = max(1, len(input_text) // 2)
+                    output_tokens = max(1, len(result) // 2)
+                    
+                    context = {
+                        "analysis_type": kwargs.get("analysis_type", "direct_call"),
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens
+                    }
+                    
+                    recorder.record_call(
+                        provider="deepseek_direct",
+                        model=self.model,
+                        messages=formatted_messages,
+                        response=result,
+                        duration=duration,
+                        session_id=session_id or f"deepseek_direct_{hash(str(messages))%10000}",
+                        context=context,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost=0.0  # 直接适配器无法获取精确成本
+                    )
+                    
+            except Exception as record_error:
+                logger.debug(f"🔍 [DeepSeekDirect] LLM调用记录失败: {record_error}")
+            
             return result
             
         except Exception as e:

@@ -26,7 +26,7 @@ class OptimizedUSDataProvider:
         self.cache = get_cache()
         self.config = get_config()
         self.last_api_call = 0
-        self.min_api_interval = 1.0  # 最小API调用间隔（秒）
+        self.min_api_interval = 1.5  # 最小API调用间隔（秒）- 增加到1.5秒避免频率限制
         
         logger.info(f"📊 优化美股数据提供器初始化完成")
     
@@ -41,6 +41,33 @@ class OptimizedUSDataProvider:
             time.sleep(wait_time)
         
         self.last_api_call = time.time()
+    
+    def _safe_finnhub_call(self, api_func, *args, **kwargs):
+        """安全的FinnHub API调用，包含重试机制"""
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                result = api_func(*args, **kwargs)
+                return result
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                if "429" in error_msg or "Too Many Requests" in error_msg or "Rate limited" in error_msg:
+                    if attempt < max_retries - 1:
+                        wait_time = (2 ** attempt) * 30  # 指数退避：30s, 60s, 120s
+                        logger.warning(f"🚫 FinnHub API频率限制 (尝试 {attempt+1}/{max_retries})，等待 {wait_time}秒...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"❌ FinnHub API频率限制，已重试{max_retries}次")
+                        return None
+                else:
+                    logger.error(f"❌ FinnHub API调用失败: {error_msg}")
+                    return None
+        
+        return None
     
     def get_stock_data(self, symbol: str, start_date: str, end_date: str, 
                       force_refresh: bool = False) -> str:
@@ -281,12 +308,15 @@ class OptimizedUSDataProvider:
             client = finnhub.Client(api_key=api_key)
 
             # 获取实时报价
-            quote = client.quote(symbol.upper())
+            quote = self._safe_finnhub_call(client.quote, symbol.upper())
             if not quote or 'c' not in quote:
                 return None
 
-            # 获取公司信息
-            profile = client.company_profile2(symbol=symbol.upper())
+            # 在两次API调用之间添加延迟，避免频率限制
+            time.sleep(1.2)
+
+            # 获取公司信息（带重试机制）
+            profile = self._safe_finnhub_call(client.company_profile2, symbol=symbol.upper())
             company_name = profile.get('name', symbol.upper()) if profile else symbol.upper()
 
             # 格式化数据

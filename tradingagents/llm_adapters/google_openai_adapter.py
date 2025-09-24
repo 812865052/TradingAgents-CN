@@ -51,7 +51,14 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
         logger.info(f"   最大Token: {kwargs.get('max_tokens', 2000)}")
     
     def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, **kwargs) -> LLMResult:
-        """重写生成方法，优化工具调用处理和内容格式"""
+        """重写生成方法，优化工具调用处理和内容格式，并添加调用记录"""
+        
+        import time
+        start_time = time.time()
+        
+        # 提取参数
+        session_id = kwargs.get('session_id', f"google_openai_{hash(str(messages))%10000}")
+        analysis_type = kwargs.get('analysis_type', 'stock_analysis')
         
         try:
             # 调用父类的生成方法
@@ -65,7 +72,37 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
                         self._optimize_message_content(generation.message)
             
             # 追踪 token 使用量
-            self._track_token_usage(result, kwargs)
+            input_tokens, output_tokens, cost = self._track_token_usage(result, kwargs)
+            
+            # 记录LLM调用详情
+            try:
+                from tradingagents.utils.llm_call_recorder import get_llm_recorder
+                
+                recorder = get_llm_recorder()
+                if recorder.is_enabled():
+                    duration = time.time() - start_time
+                    
+                    context = {
+                        "analysis_type": analysis_type,
+                        "stop_sequences": stop,
+                        "kwargs": {k: str(v)[:100] for k, v in kwargs.items() if k not in ['session_id', 'analysis_type']}
+                    }
+                    
+                    recorder.record_call(
+                        provider="google",
+                        model=self.model,
+                        messages=messages,
+                        response=result,
+                        duration=duration,
+                        session_id=session_id,
+                        context=context,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost=cost
+                    )
+                    
+            except Exception as record_error:
+                logger.debug(f"🔍 [Google] LLM调用记录失败: {record_error}")
             
             return result
             
@@ -134,8 +171,12 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
         
         return enhanced_content
     
-    def _track_token_usage(self, result: LLMResult, kwargs: Dict[str, Any]):
-        """追踪 token 使用量"""
+    def _track_token_usage(self, result: LLMResult, kwargs: Dict[str, Any]) -> tuple:
+        """追踪 token 使用量，返回(input_tokens, output_tokens, cost)"""
+        
+        input_tokens = 0
+        output_tokens = 0
+        cost = 0.0
         
         try:
             # 从结果中提取 token 使用信息
@@ -151,7 +192,7 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
                     analysis_type = kwargs.get('analysis_type', 'stock_analysis')
                     
                     # 使用 TokenTracker 记录使用量
-                    token_tracker.track_usage(
+                    usage_record = token_tracker.track_usage(
                         provider="google",
                         model_name=self.model,
                         input_tokens=input_tokens,
@@ -160,11 +201,16 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
                         analysis_type=analysis_type
                     )
                     
+                    if usage_record:
+                        cost = usage_record.cost
+                    
                     logger.debug(f"📊 [Google适配器] Token使用量: 输入={input_tokens}, 输出={output_tokens}")
                     
         except Exception as track_error:
             # token 追踪失败不应该影响主要功能
             logger.error(f"⚠️ Google适配器 Token 追踪失败: {track_error}")
+        
+        return input_tokens, output_tokens, cost
 
 
 # 支持的模型列表
