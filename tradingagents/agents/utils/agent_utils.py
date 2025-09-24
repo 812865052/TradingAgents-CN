@@ -959,7 +959,14 @@ class Toolkit:
                     us_data = get_us_stock_data_cached(ticker, start_date, end_date)
                     result_data.append(f"## 美股市场数据\n{us_data}")
                 except Exception as e:
-                    result_data.append(f"## 美股市场数据\n获取失败: {e}")
+                    logger.error(f"❌ 优化美股数据获取失败: {e}")
+                    # 备用方案：使用原始Yahoo Finance
+                    try:
+                        from tradingagents.dataflows.interface import get_YFin_data_online
+                        us_data = get_YFin_data_online(ticker, start_date, end_date)
+                        result_data.append(f"## 美股市场数据\n{us_data}")
+                    except Exception as e2:
+                        result_data.append(f"## 美股市场数据\n获取失败: {e2}")
 
             # 组合所有数据
             combined_result = f"""# {ticker} 市场数据分析
