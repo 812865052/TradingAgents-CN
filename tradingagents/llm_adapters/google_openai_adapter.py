@@ -67,6 +67,11 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
             # 优化返回内容格式
             if result and result.generations:
                 for generation in result.generations:
+                    # 检查generation是否是列表类型（处理API返回异常格式的情况）
+                    if isinstance(generation, list):
+                        logger.warning(f"⚠️ Google API返回异常格式：generation是列表类型，跳过优化处理")
+                        continue
+                    
                     if hasattr(generation, 'message') and generation.message:
                         # 优化消息内容格式
                         self._optimize_message_content(generation.message)
@@ -107,10 +112,20 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
             return result
             
         except Exception as e:
-            logger.error(f"❌ Google AI 生成失败: {e}")
+            error_str = str(e)
+            
+            # 检查是否是配额超限错误
+            if "429" in error_str or "quota" in error_str.lower() or "rate limit" in error_str.lower():
+                logger.error(f"❌ Google AI 配额超限: {e}")
+                logger.warning(f"⚠️ 建议切换到其他LLM提供商或等待配额重置")
+                error_content = "Google AI 配额已用完，请切换到其他LLM提供商（如OpenAI、DeepSeek等）或等待配额重置。"
+            else:
+                logger.error(f"❌ Google AI 生成失败: {e}")
+                error_content = f"Google AI 调用失败: {str(e)}"
+            
             # 返回一个包含错误信息的结果，而不是抛出异常
             from langchain_core.outputs import ChatGeneration
-            error_message = AIMessage(content=f"Google AI 调用失败: {str(e)}")
+            error_message = AIMessage(content=error_content)
             error_generation = ChatGeneration(message=error_message)
             return LLMResult(generations=[[error_generation]])
     

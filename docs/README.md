@@ -19,6 +19,7 @@
 - [项目概述](./overview/project-overview.md) - 项目的基本介绍和目标
 - [快速开始](./overview/quick-start.md) - 快速上手指南
 - [安装指南](./overview/installation.md) - 详细的安装说明
+- [用户认证系统](./guides/user-authentication-guide.md) - 用户登录、权限管理完整指南 ✨
 
 ### 🏗️ 架构文档
 - [系统架构](./architecture/system-architecture.md) - 整体系统架构设计 (v0.1.7更新) ✨

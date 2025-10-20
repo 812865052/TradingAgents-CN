@@ -533,7 +533,7 @@ def inject_frontend_cache_check():
             }
             
             const now = Date.now();
-            const timeout = 10 * 60 * 1000; // 10分钟
+            const timeout = 7 * 24 * 60 * 60 * 1000; // 7天
             const timeSinceLastActivity = now - data.lastActivity;
             
             console.log('⏰ 时间检查:', {

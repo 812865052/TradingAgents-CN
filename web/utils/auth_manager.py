@@ -1,7 +1,7 @@
 """
 用户认证管理器
 处理用户登录、权限验证等功能
-支持前端缓存登录状态，10分钟无操作自动失效
+支持前端缓存登录状态，7天无操作自动失效
 """
 
 import streamlit as st
@@ -28,7 +28,7 @@ class AuthManager:
     
     def __init__(self):
         self.users_file = Path(__file__).parent.parent / "config" / "users.json"
-        self.session_timeout = 600000  
+        self.session_timeout = 604800  # 7天超时 (7 * 24 * 60 * 60 = 604800秒)
         self._ensure_users_file()
     
     def _ensure_users_file(self):
@@ -83,7 +83,7 @@ class AuthManager:
                     
                     const data = JSON.parse(authData);
                     const now = Date.now();
-                    const timeout = 10 * 60 * 1000; // 10分钟
+                    const timeout = 7 * 24 * 60 * 60 * 1000; // 7天
                     
                     // 检查是否超时
                     if (now - data.lastActivity > timeout) {
